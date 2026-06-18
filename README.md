@@ -23,6 +23,52 @@ Deployed API:
 https://29zk7kfu3f.execute-api.us-east-1.amazonaws.com/prod
 ```
 
+## Use the Hosted API
+
+You can use the deployed PRPilot API directly without deploying your own AWS stack.
+
+Base URL:
+
+```text
+https://29zk7kfu3f.execute-api.us-east-1.amazonaws.com/prod
+```
+
+Health check:
+
+```bash
+curl https://29zk7kfu3f.execute-api.us-east-1.amazonaws.com/prod/health
+```
+
+Submit a diff for review:
+
+```bash
+cd /Users/muhammad/Random_Projects/PR_Pilot/PR-Pilot
+
+python3 - <<'PY' | curl -sS -X POST https://29zk7kfu3f.execute-api.us-east-1.amazonaws.com/prod/review \
+  -H 'content-type: application/json' \
+  -d @-
+import json
+from pathlib import Path
+
+body = {
+    "title": "Add JWT authentication middleware",
+    "description": "Adds protected routes and token validation.",
+    "diff": Path("tests/sample_diff.txt").read_text(),
+    "repository": "demo/prpilot",
+    "pull_request_url": "https://github.com/demo/prpilot/pull/12",
+}
+print(json.dumps(body))
+PY
+```
+
+Fetch a saved review:
+
+```bash
+curl https://29zk7kfu3f.execute-api.us-east-1.amazonaws.com/prod/reviews/<review_id>
+```
+
+Hosted API note: this endpoint runs in the project owner's AWS account and uses the project owner's Bedrock, Lambda, API Gateway, SQS, and DynamoDB resources. For heavier usage, private credentials, or production usage, deploy your own stack using the instructions below.
+
 ## Architecture
 
 ```text
@@ -336,7 +382,7 @@ export DYNAMODB_TABLE_NAME=prpilot_reviews
 make run
 ```
 
-## Deploy
+## Deploy Your Own AWS Stack
 
 Prerequisites:
 
