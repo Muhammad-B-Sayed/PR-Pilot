@@ -1,0 +1,5 @@
+.aws-sam/
+bootstrap
+prpilot-lambda.zip
+*.log
+.env

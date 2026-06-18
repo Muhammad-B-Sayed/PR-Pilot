@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: PRPilot serverless AI pull request review assistant
+
+Globals:
+  Function:
+    Runtime: provided.al2023
+    Architectures:
+      - arm64
+    Timeout: 90
+    MemorySize: 512
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+    Environment:
+      Variables:
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        DYNAMODB_TABLE_NAME: !Ref ReviewsTable
+        MAX_DIFF_CHARS: "50000"
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+  GitHubWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+
+Resources:
+  ReviewsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: prpilot_reviews
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: review_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: review_id
+          KeyType: HASH
+
+  GitHubWebhookQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: prpilot-github-webhooks
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+
+  PRPilotFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../
+      Handler: bootstrap
+      Environment:
+        Variables:
+          GITHUB_TOKEN: !Ref GitHubToken
+          GITHUB_WEBHOOK_SECRET: !Ref GitHubWebhookSecret
+          GITHUB_WEBHOOK_QUEUE_URL: !Ref GitHubWebhookQueue
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReviewsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/*
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:ChangeMessageVisibility
+              Resource: !GetAtt GitHubWebhookQueue.Arn
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            Path: /health
+            Method: GET
+            ApiId: !Ref HttpApi
+        Review:
+          Type: HttpApi
+          Properties:
+            Path: /review
+            Method: POST
+            ApiId: !Ref HttpApi
+        GetReview:
+          Type: HttpApi
+          Properties:
+            Path: /reviews/{review_id}
+            Method: GET
+            ApiId: !Ref HttpApi
+        GitHubWebhook:
+          Type: HttpApi
+          Properties:
+            Path: /webhook/github
+            Method: POST
+            ApiId: !Ref HttpApi
+        GitHubWebhookQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt GitHubWebhookQueue.Arn
+            BatchSize: 1
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - content-type
+          - x-hub-signature-256
+        AllowOrigins:
+          - "*"
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  ReviewsTableName:
+    Description: DynamoDB table storing generated reviews
+    Value: !Ref ReviewsTable
+  GitHubWebhookQueueURL:
+    Description: SQS queue for asynchronous GitHub webhook reviews
+    Value: !Ref GitHubWebhookQueue

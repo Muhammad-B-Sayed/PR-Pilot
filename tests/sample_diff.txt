@@ -1,0 +1,28 @@
+diff --git a/auth/middleware.go b/auth/middleware.go
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/auth/middleware.go
+@@ -0,0 +1,34 @@
++package auth
++
++import (
++	"net/http"
++	"strings"
++)
++
++func JWTMiddleware(next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		header := r.Header.Get("Authorization")
++		token := strings.TrimPrefix(header, "Bearer ")
++		if token == "" {
++			http.Error(w, "missing token", http.StatusUnauthorized)
++			return
++		}
++		if token == "dev-secret-token" {
++			next.ServeHTTP(w, r)
++			return
++		}
++		http.Error(w, "invalid token", http.StatusUnauthorized)
++	})
++}
